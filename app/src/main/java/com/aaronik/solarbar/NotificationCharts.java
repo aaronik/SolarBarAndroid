@@ -4,6 +4,7 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Paint;
+import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.widget.RemoteViews;
 import java.util.ArrayList;
@@ -29,47 +30,83 @@ final class NotificationCharts {
             for (LocalData.Point point : points) if (point.values[i] != null) recorded++;
             if (recorded >= 2) { trend = i; break; }
         }
-        Bitmap image = Bitmap.createBitmap(640, 88, Bitmap.Config.ARGB_8888);
+        Bitmap image = Bitmap.createBitmap(640, 96, Bitmap.Config.ARGB_8888);
         Canvas c = new Canvas(image);
         c.scale(2, 2);
         Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
         p.setColor(0xff162326);
-        c.drawRoundRect(0, 0, 320, 44, 7, 7, p);
+        c.drawRoundRect(0, 0, 320, 48, 7, 7, p);
         StringBuilder description = new StringBuilder("Victron live readings. ");
         List<Integer> active = new ArrayList<>();
         for (int i : COMPACT_ORDER) if (s.metrics[i] != null && active.size() < 6) active.add(i);
         boolean twoRows = active.size() > 3;
-        int columns = Math.max(1, twoRows ? 3 : active.size());
-        float width = (trend < 0 ? 306f : 217f) / columns;
-        for (int slot = 0; slot < active.size(); slot++) {
-            int i = active.get(slot);
-            float x = 7 + (slot % columns) * width;
-            float y = twoRows ? 3 + 20 * (slot / columns) : 9;
-            String value = SolarApp.format(i, s.metrics[i]);
-            p.setTypeface(Typeface.DEFAULT_BOLD);
-            p.setColor(0xffc0d0cf);
-            p.setTextSize(twoRows ? 7.7f : 9.5f);
-            c.drawText(COMPACT_LABELS[i], x, y + 7, p);
-            p.setColor(COLORS[i]);
-            p.setTextSize(twoRows ? 11.5f : 14);
-            c.drawText(value, x, y + (twoRows ? 17 : 23), p);
-            description.append(Victron.LABEL[i]).append(' ').append(value).append(". ");
+        int columns = twoRows ? (active.size() + 1) / 2 : active.size();
+        float divider = trend < 0 ? 320 : active.size() > 2 ? 251 : 230;
+        Rect bounds = new Rect();
+        p.setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD));
+        for (int first = 0; first < active.size(); first += columns) {
+            int count = Math.min(columns, active.size() - first);
+            float top = first == 0 ? 2 : 24;
+            float bottom = twoRows && first == 0 ? 23 : 46;
+            float labelHeight = twoRows ? 6 : 9;
+            float valueTop = top + labelHeight + 1;
+            float availableWidth = divider - 12 - 5 * (count - 1);
+            String[] values = new String[count];
+            float[] weights = new float[count];
+            float total = 0;
+            for (int cell = 0; cell < count; cell++) {
+                int i = active.get(first + cell);
+                values[cell] = SolarApp.format(i, s.metrics[i]);
+                p.setTextSize(24);
+                // Wider strings get more room, without crowding out shorter neighbors.
+                weights[cell] = Math.max(48, p.measureText(values[cell]));
+                total += weights[cell];
+            }
+            float x = 6;
+            for (int cell = 0; cell < count; cell++) {
+                int i = active.get(first + cell);
+                float width = availableWidth * weights[cell] / total;
+                p.setColor(0xffc0d0cf);
+                drawFitted(c, p, bounds, COMPACT_LABELS[i], x, top, width, top + labelHeight, twoRows ? 8.5f : 12);
+                p.setColor(COLORS[i]);
+                drawFitted(c, p, bounds, values[cell], x, valueTop, width, bottom, twoRows ? 24 : 46);
+                description.append(Victron.LABEL[i]).append(' ').append(values[cell]).append(". ");
+                x += width + 5;
+            }
         }
         if (trend >= 0) {
             p.setColor(0xff435355);
             p.setStrokeWidth(1);
-            c.drawLine(225, 6, 225, 38, p);
-            p.setTypeface(Typeface.DEFAULT_BOLD);
+            c.drawLine(divider, 5, divider, 43, p);
             p.setColor(COLORS[trend]);
-            p.setTextSize(8);
-            c.drawText("10m " + COMPACT_LABELS[trend], 232, 12, p);
-            plot(c, p, points, trend, s.metrics[trend], now, 232, 313, 16, 37);
+            float left = divider + 5;
+            drawFitted(c, p, bounds, "10m " + COMPACT_LABELS[trend], left, 4, 314 - left, 13, 10);
+            plot(c, p, points, trend, s.metrics[trend], now, left, 314, 16, 42);
             description.append("10-minute ").append(Victron.LABEL[trend]).append(" trend.");
         }
         RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.notification_compact);
         views.setImageViewBitmap(R.id.notification_compact_image, image);
         views.setContentDescription(R.id.notification_compact_image, description.toString());
         return views;
+    }
+
+    // Fit the actual ink, including minus signs, unit glyphs, and localized digits.
+    private static void drawFitted(Canvas c, Paint p, Rect bounds, String text,
+                                   float x, float top, float width, float bottom, float maxSize) {
+        float low = 0, high = maxSize;
+        for (int step = 0; step < 10; step++) {
+            float size = (low + high) / 2;
+            p.setTextSize(size);
+            p.getTextBounds(text, 0, text.length(), bounds);
+            if (bounds.width() <= width && bounds.height() <= bottom - top) low = size;
+            else high = size;
+        }
+        p.setTextSize(low);
+        p.getTextBounds(text, 0, text.length(), bounds);
+        int layer = c.save();
+        c.clipRect(x, top, x + width, bottom);
+        c.drawText(text, x - bounds.left, top + (bottom - top - bounds.height()) / 2 - bounds.top, p);
+        c.restoreToCount(layer);
     }
 
     static RemoteViews render(Context context, Victron.Snapshot snapshot, List<LocalData.Point> points, long now) {
