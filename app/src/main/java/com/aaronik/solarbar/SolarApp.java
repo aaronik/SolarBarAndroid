@@ -24,6 +24,7 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
+import android.widget.RemoteViews;
 import java.io.IOException;
 import java.security.GeneralSecurityException;
 import java.util.ArrayList;
@@ -254,26 +255,19 @@ public final class SolarApp extends Application {
         if (observer != null) observer.run();
     }
     private void post(Victron.Snapshot s, long now) {
-        List<String> compact = new ArrayList<>(), detail = new ArrayList<>(), recent = new ArrayList<>();
+        List<String> compact = new ArrayList<>();
         long wall = System.currentTimeMillis();
-        List<LocalData.Point> points = history.load(wall - 600_000, wall);
+        List<LocalData.Point> points = history.load(wall - NotificationCharts.WINDOW, wall);
         int[] order = {Victron.SOC, Victron.SOLAR, Victron.AC, Victron.VA, Victron.BATTERY, Victron.VOLTAGE, Victron.VAC};
-        String[] shortNames = {"Battery", "Bank", "Battery", "Solar", "AC", "AC", "AC"};
         for (int i : order) {
             Double value = s.metrics[i];
             if (value == null) continue;
-            if (compact.size() < 3 && (i != Victron.VOLTAGE || s.metrics[Victron.SOC] == null)) compact.add(shortNames[i] + " " + format(i, value));
-            detail.add(Victron.LABEL[i] + " " + format(i, value));
-            if (recent.size() >= 3 || (i == Victron.VOLTAGE && s.metrics[Victron.SOC] != null)) continue;
-            double min = value, max = value;
-            int n = 0;
-            for (LocalData.Point point : points) if (point.values[i] != null) {
-                min = Math.min(min, point.values[i]); max = Math.max(max, point.values[i]); n++;
+            if (compact.size() < 3 && (i != Victron.VOLTAGE || s.metrics[Victron.SOC] == null)) {
+                compact.add(NotificationCharts.SHORT_NAMES[i] + " " + format(i, value));
             }
-            if (n >= 2) recent.add(shortNames[i] + " " + (format(i, min).equals(format(i, max)) ? format(i, max) : format(i, min) + " – " + format(i, max)));
         }
-        String expanded = String.join("  ·  ", detail);
-        if (!recent.isEmpty()) expanded += "\n\nLast 10 min: " + String.join("  ·  ", recent);
+        RemoteViews collapsed = NotificationCharts.compact(this, s, points, wall);
+        RemoteViews chart = NotificationCharts.render(this, s, points, wall);
         PendingIntent open = PendingIntent.getActivity(this, 2, new Intent(this, MainActivity.class).setAction("com.aaronik.solarbar.OPEN")
                 .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP), PendingIntent.FLAG_IMMUTABLE);
         // Android may send deleteIntent for system timeouts as well as user swipes.
@@ -281,12 +275,14 @@ public final class SolarApp extends Application {
         Intent removed = new Intent(this, SolarReceiver.class).setAction(DISMISS)
                 .setIdentifier(Long.toString(s.expires)).putExtra(EXPIRES, s.expires);
         PendingIntent delete = PendingIntent.getBroadcast(this, 3, removed, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_ONE_SHOT);
-        Notification notice = new Notification.Builder(this, CHANNEL).setSmallIcon(R.drawable.ic_bolt)
+        Notification.Builder notice = new Notification.Builder(this, CHANNEL).setSmallIcon(R.drawable.ic_bolt)
                 .setContentTitle("Victron · Live").setContentText(String.join("  ·  ", compact))
-                .setStyle(new Notification.BigTextStyle().bigText(expanded)).setContentIntent(open).setDeleteIntent(delete)
+                .setContentIntent(open).setDeleteIntent(delete)
                 .setOnlyAlertOnce(true).setOngoing(false).setAutoCancel(false).setShowWhen(false)
-                .setVisibility(Notification.VISIBILITY_PRIVATE).setTimeoutAfter(Math.max(1, s.expires - now)).build();
-        notices.notify(NOTICE_ID, notice);
+                .setVisibility(Notification.VISIBILITY_PRIVATE).setTimeoutAfter(Math.max(1, s.expires - now));
+        notice.setStyle(new Notification.DecoratedCustomViewStyle()).setCustomContentView(collapsed);
+        if (chart != null) notice.setCustomBigContentView(chart);
+        notices.notify(NOTICE_ID, notice.build());
     }
     static String format(int metric, double value) {
         if (metric == Victron.SOC) return String.format(Locale.getDefault(), "%.0f%%", value);

@@ -13,11 +13,16 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.SystemClock;
 import android.provider.Settings;
+import android.text.Editable;
 import android.text.InputType;
+import android.text.TextWatcher;
+import android.text.method.PasswordTransformationMethod;
 import android.view.Gravity;
 import android.view.View;
 import android.view.WindowInsets;
+import android.view.WindowManager;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -199,14 +204,43 @@ public final class MainActivity extends Activity {
         EditText input = new EditText(this);
         input.setSingleLine(true); input.setHint("32-character advertisement key");
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
-        LinearLayout wrap = column(); wrap.setPadding(dp(20), dp(5), dp(20), 0); wrap.addView(input);
+        input.setSaveEnabled(false);
+        input.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
+        if (d.key != null) {
+            StringBuilder hex = new StringBuilder(32);
+            for (byte b : d.key) hex.append(Character.forDigit((b & 0xff) >>> 4, 16)).append(Character.forDigit(b & 15, 16));
+            input.setText(hex);
+            input.setSelection(input.length());
+        }
+        CheckBox reveal = new CheckBox(this);
+        reveal.setText("Show key");
+        reveal.setOnCheckedChangeListener((button, show) -> {
+            int start = input.getSelectionStart(), end = input.getSelectionEnd();
+            input.setTransformationMethod(show ? null : PasswordTransformationMethod.getInstance());
+            if (start >= 0 && end >= 0) input.setSelection(start, end);
+        });
+        TextView count = text("", 13, MUTED);
+        Runnable updateCount = () -> {
+            String entered = input.getText().toString().trim();
+            count.setText(entered.length() + " / 32 characters" + (entered.matches("[0-9a-fA-F]*") ? "" : " · Use only 0–9 and A–F"));
+        };
+        updateCount.run();
+        input.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) { updateCount.run(); }
+            @Override public void afterTextChanged(Editable editable) { }
+        });
+        LinearLayout wrap = column(); wrap.setPadding(dp(20), dp(5), dp(20), 0);
+        wrap.addView(input); wrap.addView(count); wrap.addView(reveal);
         AlertDialog.Builder b = new AlertDialog.Builder(this).setTitle(d.name).setView(wrap)
                 .setNegativeButton("Cancel", null).setPositiveButton("Save", null);
         if (d.key != null) b.setNeutralButton("Forget key", (dialog, which) -> {
             try { app.forget(d); }
             catch (IOException e) { new AlertDialog.Builder(this).setMessage("Could not remove the saved key.").setPositiveButton("OK", null).show(); }
         });
-        AlertDialog alert = b.show();
+        AlertDialog alert = b.create();
+        alert.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        alert.show();
         alert.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
             try { app.save(d, input.getText().toString()); alert.dismiss(); }
             catch (IllegalArgumentException e) { input.setError(e.getMessage()); }
