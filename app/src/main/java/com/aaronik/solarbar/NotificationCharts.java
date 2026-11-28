@@ -38,41 +38,43 @@ final class NotificationCharts {
         c.drawRoundRect(0, 0, 320, 48, 7, 7, p);
         StringBuilder description = new StringBuilder("Victron live readings. ");
         List<Integer> active = new ArrayList<>();
-        for (int i : COMPACT_ORDER) if (s.metrics[i] != null && active.size() < 6) active.add(i);
-        boolean twoRows = active.size() > 3;
-        int columns = twoRows ? (active.size() + 1) / 2 : active.size();
-        float divider = trend < 0 ? 320 : active.size() > 2 ? 251 : 230;
+        List<String> values = new ArrayList<>();
+        List<Float> widths = new ArrayList<>();
         Rect bounds = new Rect();
         p.setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD));
-        for (int first = 0; first < active.size(); first += columns) {
-            int count = Math.min(columns, active.size() - first);
-            float top = first == 0 ? 2 : 24;
-            float bottom = twoRows && first == 0 ? 23 : 46;
-            float labelHeight = twoRows ? 6 : 9;
-            float valueTop = top + labelHeight + 1;
-            float availableWidth = divider - 12 - 5 * (count - 1);
-            String[] values = new String[count];
-            float[] weights = new float[count];
-            float total = 0;
-            for (int cell = 0; cell < count; cell++) {
-                int i = active.get(first + cell);
-                values[cell] = SolarApp.format(i, s.metrics[i]);
-                p.setTextSize(24);
-                // Wider strings get more room, without crowding out shorter neighbors.
-                weights[cell] = Math.max(48, p.measureText(values[cell]));
-                total += weights[cell];
-            }
-            float x = 6;
-            for (int cell = 0; cell < count; cell++) {
-                int i = active.get(first + cell);
-                float width = availableWidth * weights[cell] / total;
-                p.setColor(0xffc0d0cf);
-                drawFitted(c, p, bounds, COMPACT_LABELS[i], x, top, width, top + labelHeight, twoRows ? 8.5f : 12);
-                p.setColor(COLORS[i]);
-                drawFitted(c, p, bounds, values[cell], x, valueTop, width, bottom, twoRows ? 24 : 46);
-                description.append(Victron.LABEL[i]).append(' ').append(values[cell]).append(". ");
-                x += width + 5;
-            }
+        final float gap = 9, inset = 7;
+        float used = 2 * inset;
+        for (int i : COMPACT_ORDER) {
+            if (s.metrics[i] == null) continue;
+            String value = SolarApp.format(i, s.metrics[i]);
+            p.setTextSize(30);
+            p.getTextBounds(value, 0, value.length(), bounds);
+            float width = Math.max(44, bounds.width() + 1);
+            p.setTextSize(10);
+            width = Math.max(width, p.measureText(COMPACT_LABELS[i]) + 1);
+            float next = used + (active.isEmpty() ? 0 : gap) + width;
+            // Leave the remaining readings to the dashboard rather than shrink the whole row.
+            if (!active.isEmpty() && (next > 320 || active.size() == 4)) break;
+            active.add(i);
+            values.add(value);
+            widths.add(width);
+            used = next;
+        }
+        float divider = 320;
+        if (trend >= 0 && used <= 246) divider = 246;
+        else trend = -1;
+        float extra = (divider - used) / Math.max(1, active.size());
+        float x = inset;
+        for (int cell = 0; cell < active.size(); cell++) {
+            int i = active.get(cell);
+            float width = widths.get(cell) + extra;
+            String value = values.get(cell);
+            p.setColor(0xffc0d0cf);
+            drawFitted(c, p, bounds, COMPACT_LABELS[i], x, 2, width, 12, 12);
+            p.setColor(COLORS[i]);
+            drawFitted(c, p, bounds, value, x, 13, width, 46, 46);
+            description.append(Victron.LABEL[i]).append(' ').append(value).append(". ");
+            x += width + gap;
         }
         if (trend >= 0) {
             p.setColor(0xff435355);
