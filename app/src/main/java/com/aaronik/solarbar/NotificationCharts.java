@@ -7,6 +7,7 @@ import android.graphics.Paint;
 import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.widget.RemoteViews;
+import android.view.View;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -119,45 +120,58 @@ final class NotificationCharts {
             metrics.add(i);
             if (metrics.size() == 3) break;
         }
-        if (metrics.isEmpty() || points.isEmpty()) return null;
-        boolean hasHistory = false;
-        for (LocalData.Point point : points) for (int i : metrics) if (point.values[i] != null) hasHistory = true;
-        if (!hasHistory) return null;
-        Bitmap image = Bitmap.createBitmap(640, 260, Bitmap.Config.ARGB_8888);
+        if (metrics.isEmpty()) return null;
+        RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.notification_charts);
+        views.removeAllViews(R.id.expanded_metrics);
+        for (int i : metrics) {
+            RemoteViews metric = new RemoteViews(context.getPackageName(), R.layout.notification_metric);
+            metric.setTextViewText(R.id.expanded_metric_value, SolarApp.format(i, snapshot.metrics[i]));
+            metric.setTextColor(R.id.expanded_metric_value, COLORS[i]);
+            metric.setTextViewText(R.id.expanded_metric_label, compactName(i));
+            views.addView(R.id.expanded_metrics, metric);
+        }
+        List<Integer> trends = new ArrayList<>();
+        for (int i : metrics) {
+            for (LocalData.Point point : points) if (point.values[i] != null) { trends.add(i); break; }
+        }
+        if (trends.isEmpty()) {
+            views.setTextViewText(R.id.notification_chart_caption, "Collecting 10-minute history…");
+            views.setViewVisibility(R.id.notification_chart_image, View.GONE);
+            return views;
+        }
+        Bitmap image = Bitmap.createBitmap(640, 136, Bitmap.Config.ARGB_8888);
         Canvas c = new Canvas(image);
         c.scale(2, 2);
         Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-        p.setColor(0xff162326);
-        c.drawRoundRect(0, 0, 320, 130, 9, 9, p);
-        p.setColor(0xffc0d0cf);
-        p.setTextSize(11);
         p.setTypeface(Typeface.DEFAULT_BOLD);
-        c.drawText("LAST 10 MIN", 11, 16, p);
-        p.setTextAlign(Paint.Align.RIGHT);
-        c.drawText("NOW", 309, 16, p);
-        p.setTextAlign(Paint.Align.LEFT);
-        StringBuilder description = new StringBuilder("Last 10 minutes. ");
-        float rowHeight = 99f / metrics.size();
-        for (int row = 0; row < metrics.size(); row++) {
-            int i = metrics.get(row);
-            float top = 22 + row * rowHeight, bottom = top + rowHeight - 4;
-            String label = i == Victron.VA ? "AC apparent" : Victron.LABEL[i];
-            String value = SolarApp.format(i, snapshot.metrics[i]);
-            p.setTypeface(Typeface.DEFAULT);
-            p.setColor(0xffc0d0cf);
-            p.setTextSize(11);
-            c.drawText(label, 11, top + 11, p);
-            p.setTypeface(Typeface.DEFAULT_BOLD);
+        p.setColor(0xff162326);
+        c.drawRoundRect(0, 0, 320, 68, 7, 7, p);
+        Rect bounds = new Rect();
+        StringBuilder description = new StringBuilder("10-minute trends: ");
+        float height = 62f / trends.size();
+        for (int row = 0; row < trends.size(); row++) {
+            int i = trends.get(row);
+            float top = 3 + row * height;
             p.setColor(COLORS[i]);
-            p.setTextSize(12);
-            c.drawText(value, 11, top + 24, p);
-            description.append(label).append(' ').append(value).append(". ");
-            plot(c, p, points, i, snapshot.metrics[i], now, 108, 308, top + 3, bottom);
+            drawFitted(c, p, bounds, compactName(i), 7, top, 70, top + height, 13);
+            plot(c, p, points, i, snapshot.metrics[i], now, 83, 312, top + 3, top + height - 3);
+            description.append(Victron.LABEL[i]).append(". ");
         }
-        RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.notification_charts);
         views.setImageViewBitmap(R.id.notification_chart_image, image);
         views.setContentDescription(R.id.notification_chart_image, description.toString());
         return views;
+    }
+
+    private static String compactName(int metric) {
+        switch (metric) {
+            case Victron.SOC: return "Battery";
+            case Victron.BATTERY: return "Bank power";
+            case Victron.VOLTAGE: return "Bank volts";
+            case Victron.SOLAR: return "Solar";
+            case Victron.AC: return "AC output";
+            case Victron.VA: return "AC apparent";
+            default: return "AC volts";
+        }
     }
 
     private static void plot(Canvas c, Paint p, List<LocalData.Point> points, int i, double latest, long now, float left, float right, float top, float bottom) {

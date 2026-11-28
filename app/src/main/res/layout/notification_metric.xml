@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+    android:orientation="vertical" android:padding="3dp">
+    <TextView android:id="@+id/expanded_metric_value"
+        android:layout_width="match_parent" android:layout_height="40dp"
+        android:gravity="center" android:fontFamily="sans-serif-condensed" android:textStyle="bold"
+        android:textSize="32sp" android:maxLines="1" android:includeFontPadding="false"
+        android:autoSizeTextType="uniform" android:autoSizeMinTextSize="17sp"
+        android:autoSizeMaxTextSize="34sp" android:autoSizeStepGranularity="1sp" />
+    <TextView android:id="@+id/expanded_metric_label"
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:textColor="#DFE9E8" android:textSize="13sp" android:gravity="center"
+        android:maxLines="1" android:ellipsize="end" />
+</LinearLayout>
