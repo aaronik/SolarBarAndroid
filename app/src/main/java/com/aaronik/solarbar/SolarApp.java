@@ -49,7 +49,7 @@ public final class SolarApp extends Application {
     private SharedPreferences settings;
     private BluetoothAdapter adapter;
     private boolean scanRequested, published, armed;
-    private long nextStart, nextPost;
+    private long nextStart, nextPost, scanActivity;
     private int scanError;
     private Runnable observer;
     private final Runnable tick = () -> refresh(false);
@@ -72,8 +72,8 @@ public final class SolarApp extends Application {
         // The Bluetooth stack may be in a separate privileged process; this is a protected broadcast.
         BroadcastReceiver bluetoothChanges = new BroadcastReceiver() {
             @Override public void onReceive(Context context, Intent intent) {
-                if (enabled()) { ensureScan(); refresh(true); }
-                else { stopScan(); refresh(true); }
+                if (intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR) == BluetoothAdapter.STATE_OFF) stopScan();
+                bluetoothChanged(false);
             }
         };
         IntentFilter state = new IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED);
@@ -98,7 +98,14 @@ public final class SolarApp extends Application {
         if (snapshot().hasData()) return "Receiving live Victron readings";
         return "Listening for Victron Instant Readout nearby…";
     }
-    void observe(Runnable render) { observer = render; ensureScan(); refresh(true); }
+    void bluetoothChanged(boolean fromJob) {
+        // A cached app can miss the OFF broadcast entirely. If the scan has not
+        // started or delivered a result recently, re-register it with the new stack.
+        if (fromJob && enabled() && scanRequested && SystemClock.elapsedRealtime() - scanActivity > 5_000) stopScan();
+        ensureScan();
+        refresh(true);
+    }
+    void observe(Runnable render) { observer = render; BluetoothStateJob.watch(this); ensureScan(); refresh(true); }
     void unobserve(Runnable render) { if (observer == render) observer = null; }
     void arm() { armed = true; settings.edit().putBoolean("armed", true).apply(); ensureScan(); refresh(true); }
     void dismiss() { armed = false; settings.edit().putBoolean("armed", false).apply(); refresh(true); }
@@ -145,6 +152,7 @@ public final class SolarApp extends Application {
             int error = scanner.startScan(Collections.singletonList(filter), options, callback(PendingIntent.FLAG_UPDATE_CURRENT));
             if (error != 0 && error != ScanCallback.SCAN_FAILED_ALREADY_STARTED) { failed(error); return; }
             scanRequested = true;
+            scanActivity = now;
             // If Android later delivers an async scan error, the receiver backs off before restarting.
             scanError = 0;
         } catch (IllegalStateException | SecurityException e) { failed(-1); }
@@ -183,6 +191,7 @@ public final class SolarApp extends Application {
         else results = intent.getParcelableArrayListExtra(BluetoothLeScanner.EXTRA_LIST_SCAN_RESULT);
         if (results == null || results.isEmpty()) return;
         scanRequested = true;
+        scanActivity = SystemClock.elapsedRealtime();
         scanError = 0;
         boolean changed = false;
         for (ScanResult result : results) changed |= accept(result);
